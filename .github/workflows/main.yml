@@ -6,8 +6,27 @@ on:
     - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
 
 jobs:
+  prepare:
+    name: Get Latest Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+    steps:
+      - name: Get latest Aseprite release version
+        id: get_version
+        run: |
+          # Get the latest release information
+          LATEST_RELEASE_INFO=$(curl -s https://api.github.com/repos/aseprite/aseprite/releases/latest)
+          LATEST_TAG=$(echo "$LATEST_RELEASE_INFO" | grep -o '"tag_name": *"[^"]*"' | sed 's/"tag_name": *"//;s/"$//')
+          VERSION=${LATEST_TAG#v}  # Remove 'v' prefix if present
+          
+          echo "Latest Aseprite version: $VERSION (from tag $LATEST_TAG)"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+        shell: bash
+
   build:
     name: Build on ${{ matrix.os }}
+    needs: prepare
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -48,122 +67,187 @@ jobs:
             artifact-name: aseprite-linux-x86
             installer-ext: tar.gz
 
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SKIA_RELEASE: m124-08a5439a6b
+
     steps:
-      - name: Checkout repository for configurations only
-        uses: actions/checkout@v3
-
-      - name: Get latest Aseprite release version
-        id: get_version
+      - name: Download Aseprite source code
         run: |
-          # Get the latest release information
-          LATEST_RELEASE_INFO=$(curl -s https://api.github.com/repos/aseprite/aseprite/releases/latest)
-          LATEST_TAG=$(echo "$LATEST_RELEASE_INFO" | grep -o '"tag_name": *"[^"]*"' | sed 's/"tag_name": *"//;s/"$//')
-          VERSION=${LATEST_TAG#v}  # Remove 'v' prefix if present
+          mkdir -p $HOME/aseprite-source
+          cd $HOME/aseprite-source
           
-          echo "Latest Aseprite version: $VERSION (from tag $LATEST_TAG)"
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          # Format the download URL
+          DOWNLOAD_URL="https://github.com/aseprite/aseprite/releases/download/v${VERSION}/Aseprite-v${VERSION}-Source.zip"
           
-          # Save version to file for other steps
-          echo "$VERSION" > version.txt
-        shell: bash
-
-      - name: Install dependencies (Windows)
-        if: matrix.platform == 'windows'
-        run: |
-          choco install innosetup
-        shell: bash
-
-      - name: Download latest Aseprite release
-        run: |
-          mkdir -p build/bin
-          cd build/bin
+          echo "Downloading Aseprite source from $DOWNLOAD_URL"
+          curl -L -o aseprite-source.zip "$DOWNLOAD_URL"
           
-          # Format the download URL based on the matrix information
-          DOWNLOAD_URL="https://github.com/aseprite/aseprite/releases/download/v${{ env.VERSION }}/Aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.installer-ext }}"
+          # Extract the source code
+          unzip -q aseprite-source.zip
           
-          echo "Downloading Aseprite from $DOWNLOAD_URL"
-          curl -L -o aseprite-package.${{ matrix.installer-ext }} "$DOWNLOAD_URL"
-          
-          # Extract the package
-          if [[ "${{ matrix.installer-ext }}" == "zip" ]]; then
-            unzip -q aseprite-package.zip
-          elif [[ "${{ matrix.installer-ext }}" == "tar.gz" ]]; then
-            tar -xzf aseprite-package.tar.gz
-          fi
-          
-          # Clean up the downloaded package
-          rm aseprite-package.${{ matrix.installer-ext }}
+          # Move contents to the expected location
+          mv Aseprite-*/* .
           
           # List the extracted contents for debugging
           echo "Extracted directory structure:"
           ls -la
         shell: bash
 
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          choco install ninja cmake --installargs 'ADD_CMAKE_TO_PATH=System'
+          choco install innosetup
+        shell: bash
+
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          brew install ninja cmake
+        shell: bash
+
+      - name: Install dependencies (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y g++ clang libc++-dev libc++abi-dev cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
+          sudo apt-get install -y fuse libfuse2 libappindicator3-dev
+        shell: bash
+
+      - name: Download pre-built Skia
+        run: |
+          mkdir -p $HOME/deps
+          cd $HOME/deps
+          echo "Downloading Skia for ${{ matrix.platform }}-${{ matrix.arch }} from release ${{ env.SKIA_RELEASE }}..."
+          
+          if [[ "${{ matrix.platform }}" == "windows" ]]; then
+            SKIA_FILE="Skia-Windows-Release-${{ matrix.arch }}.zip"
+          elif [[ "${{ matrix.platform }}" == "macos" ]]; then
+            SKIA_FILE="Skia-macOS-Release-${{ matrix.arch }}.zip"
+          elif [[ "${{ matrix.platform }}" == "linux" ]]; then
+            SKIA_FILE="Skia-Linux-Release-${{ matrix.arch }}-libc++.zip"
+          fi
+          
+          curl -L -o skia.zip https://github.com/aseprite/skia/releases/download/${{ env.SKIA_RELEASE }}/${SKIA_FILE}
+          
+          # List the contents of the zip file for debugging
+          echo "Contents of the downloaded file:"
+          file skia.zip
+          
+          unzip -q skia.zip -d skia
+          
+          # List the extracted contents for debugging
+          echo "Extracted directory structure:"
+          find skia -type d | sort
+        shell: bash
+
+      - name: Set up MSVC (Windows)
+        if: matrix.platform == 'windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: ${{ matrix.arch }}
+
+      - name: Configure and build (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          cd $HOME/aseprite-source
+          mkdir build
+          cd build
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/skia.lib -G Ninja ..
+          ninja aseprite
+        shell: bash
+
+      - name: Configure and build (macOS)
+        if: matrix.platform == 'macos'
+        run: |
+          cd $HOME/aseprite-source
+          mkdir build
+          cd build
+          cmake -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
+          ninja aseprite
+        shell: bash
+
+      - name: Configure and build (Linux)
+        if: matrix.platform == 'linux'
+        run: |
+          cd $HOME/aseprite-source
+          mkdir build
+          cd build
+          
+          # Set additional flags for 32-bit builds
+          if [[ "${{ matrix.arch }}" == "x86" ]]; then
+            export CFLAGS="-m32"
+            export CXXFLAGS="-m32"
+            EXTRA_FLAGS="-DCMAKE_CXX_FLAGS=-m32 -DCMAKE_C_FLAGS=-m32"
+          else
+            EXTRA_FLAGS=""
+          fi
+          
+          cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a $EXTRA_FLAGS -G Ninja ..
+          ninja aseprite
+        shell: bash
+
       - name: 获取 "libcrypto-1_1-x64.dll"
         if: matrix.platform == 'windows' && matrix.arch == 'x64'
         shell: bash 
         run: |
-          curl -L -o build/bin/libcrypto-1_1-x64.dll https://github.com/feenkcom/libopenssl/releases/download/v0.7.0/crypto-x86_64-pc-windows-msvc.dll
+          curl -L -o $HOME/aseprite-source/build/bin/libcrypto-1_1-x64.dll https://github.com/feenkcom/libopenssl/releases/download/v0.7.0/crypto-x86_64-pc-windows-msvc.dll
 
       - name: Create Windows package
         if: matrix.platform == 'windows'
         run: |
           mkdir -p packaging/win
-          cd build/bin
+          cd $HOME/aseprite-source/build/bin
           # Create a zip file for distribution
-          7z a -tzip ../../aseprite-${{ env.VERSION }}-windows-${{ matrix.arch }}.zip .
+          7z a -tzip ../../aseprite-${VERSION}-windows-${{ matrix.arch }}.zip .
         shell: bash
 
       - name: Compile .ISS to .EXE Installer
         if: matrix.platform == 'windows'
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
-          path: inno/aseprite.iss
+          path: $HOME/aseprite-source/inno/aseprite.iss
           options: /DAppVersion=${{ env.VERSION }} /DArchitecture=${{ matrix.inno-arch }} /DArchitecturesAllowed=${{ matrix.inno-allowed }}
+
+      - name: Create macOS package
+        if: matrix.platform == 'macos'
+        run: |
+          cd $HOME/aseprite-source/build
+          mkdir -p packaging/macos
+          cd bin
+          zip -r ../../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
+        shell: bash
+
+      - name: Create Linux package
+        if: matrix.platform == 'linux'
+        run: |
+          cd $HOME/aseprite-source/build
+          mkdir -p packaging/linux
+          cd bin
+          tar -czvf ../../aseprite-${VERSION}-linux-${{ matrix.arch }}.tar.gz .
+        shell: bash
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.6.2
         with:
           name: ${{ matrix.artifact-name }}
           path: |
-            aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}
-            aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*-installer.exe
-          retention-days: 7
-
-      - name: Upload version info
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: version-info
-          path: version.txt
+            $HOME/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}
+            $HOME/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*-installer.exe
           retention-days: 7
 
   create-release:
     name: Create Release
-    needs: build
+    needs: [prepare, build]
     runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v3
-
-      - name: Download version info
-        uses: actions/download-artifact@v4.1.4
-        with:
-          name: version-info
-          path: .
-
-      - name: Set version from file
-        id: get_version
-        run: |
-          VERSION=$(cat version.txt)
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Using Aseprite version: $VERSION"
-        shell: bash
-
       - name: Download all artifacts
         uses: actions/download-artifact@v4.1.4
         with:
           path: artifacts
-          pattern: aseprite-*
 
       - name: List downloaded artifacts
         run: |
@@ -202,6 +286,4 @@ jobs:
             ## Release Notes
             
             Built by: @BachMacThanh  
-            Build date: 2025-06-10
-            
-            This is a repackaged distribution of the official Aseprite release.
+            Build date: 2025-06-10 18:10:07
