@@ -7,10 +7,11 @@ on:
 
 jobs:
   prepare:
-    name: Get Latest Version
+    name: Get Latest Version and Check Skia Availability
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
+      skia_release: ${{ steps.check_skia.outputs.skia_release }}
     steps:
       - name: Get latest Aseprite release version
         id: get_version
@@ -22,6 +23,33 @@ jobs:
           
           echo "Latest Aseprite version: $VERSION (from tag $LATEST_TAG)"
           echo "version=$VERSION" >> $GITHUB_OUTPUT
+        shell: bash
+        
+      - name: Check latest Skia release
+        id: check_skia
+        run: |
+          # Find the latest Skia release that's compatible with Aseprite
+          SKIA_RELEASE="m124-08a5439a6b"
+          
+          # Verify if the Skia files exist for all platforms
+          SKIA_FILES=(
+            "Skia-Windows-Release-x64.zip"
+            "Skia-Windows-Release-x86.zip"
+            "Skia-macOS-Release-x64.zip"
+            "Skia-macOS-Release-arm64.zip"
+            "Skia-Linux-Release-x64-libc++.zip"
+          )
+          
+          for FILE in "${SKIA_FILES[@]}"; do
+            URL="https://github.com/aseprite/skia/releases/download/${SKIA_RELEASE}/${FILE}"
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${URL}")
+            echo "Checking ${URL}: ${HTTP_CODE}"
+            if [[ "${HTTP_CODE}" != "200" && "${HTTP_CODE}" != "302" ]]; then
+              echo "Warning: Could not find ${FILE} in release ${SKIA_RELEASE}"
+            fi
+          done
+          
+          echo "skia_release=${SKIA_RELEASE}" >> $GITHUB_OUTPUT
         shell: bash
 
   build:
@@ -39,6 +67,7 @@ jobs:
             installer-ext: zip
             inno-arch: "x64"
             inno-allowed: "x64"
+            skia_file: "Skia-Windows-Release-x64.zip"
           - os: windows-latest
             platform: windows
             arch: x86
@@ -46,30 +75,36 @@ jobs:
             installer-ext: zip
             inno-arch: "x86"
             inno-allowed: ""
+            skia_file: "Skia-Windows-Release-x86.zip"
           - os: macos-latest
             platform: macos
             arch: x64
             artifact-name: aseprite-macos-intel
             installer-ext: zip
+            skia_file: "Skia-macOS-Release-x64.zip"
           - os: macos-latest
             platform: macos
             arch: arm64
             artifact-name: aseprite-macos-arm64
             installer-ext: zip
+            skia_file: "Skia-macOS-Release-arm64.zip"
           - os: ubuntu-latest
             platform: linux
             arch: x64
             artifact-name: aseprite-linux-x64
             installer-ext: tar.gz
-          - os: ubuntu-latest
-            platform: linux
-            arch: x86
-            artifact-name: aseprite-linux-x86
-            installer-ext: tar.gz
+            skia_file: "Skia-Linux-Release-x64-libc++.zip"
+          # Removing Linux x86 build as Skia doesn't provide binaries for it
+          # - os: ubuntu-latest
+          #   platform: linux
+          #   arch: x86
+          #   artifact-name: aseprite-linux-x86
+          #   installer-ext: tar.gz
+          #   skia_file: "Skia-Linux-Release-x86-libc++.zip"
 
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
-      SKIA_RELEASE: m124-08a5439a6b
+      SKIA_RELEASE: ${{ needs.prepare.outputs.skia_release }}
 
     steps:
       - name: Download Aseprite source code
@@ -83,6 +118,12 @@ jobs:
           echo "Downloading Aseprite source from $DOWNLOAD_URL"
           curl -L -o aseprite-source.zip "$DOWNLOAD_URL"
           
+          # Check if download was successful
+          if [ ! -s aseprite-source.zip ]; then
+            echo "Failed to download Aseprite source code"
+            exit 1
+          fi
+          
           # Extract the source code
           unzip -q aseprite-source.zip
           
@@ -94,9 +135,11 @@ jobs:
           if [ -d "Aseprite-v${VERSION}" ]; then
             echo "Moving files from Aseprite-v${VERSION} directory"
             mv Aseprite-v${VERSION}/* .
+            rmdir Aseprite-v${VERSION}
           elif [ -d "Aseprite-${VERSION}" ]; then
             echo "Moving files from Aseprite-${VERSION} directory"
             mv Aseprite-${VERSION}/* .
+            rmdir Aseprite-${VERSION}
           else
             echo "Directory structure is already correct or different from expected"
             find . -type d -maxdepth 1 | sort
@@ -130,20 +173,21 @@ jobs:
           cd $HOME/deps
           echo "Downloading Skia for ${{ matrix.platform }}-${{ matrix.arch }} from release ${{ env.SKIA_RELEASE }}..."
           
-          if [[ "${{ matrix.platform }}" == "windows" ]]; then
-            SKIA_FILE="Skia-Windows-Release-${{ matrix.arch }}.zip"
-          elif [[ "${{ matrix.platform }}" == "macos" ]]; then
-            SKIA_FILE="Skia-macOS-Release-${{ matrix.arch }}.zip"
-          elif [[ "${{ matrix.platform }}" == "linux" ]]; then
-            SKIA_FILE="Skia-Linux-Release-${{ matrix.arch }}-libc++.zip"
+          SKIA_URL="https://github.com/aseprite/skia/releases/download/${{ env.SKIA_RELEASE }}/${{ matrix.skia_file }}"
+          echo "Download URL: ${SKIA_URL}"
+          
+          # Use -f flag to fail on server errors
+          curl -L -f -o skia.zip "${SKIA_URL}"
+          
+          # Check if download was successful and file is a zip
+          if [ ! -s skia.zip ]; then
+            echo "Failed to download Skia binaries"
+            exit 1
           fi
           
-          curl -L -o skia.zip https://github.com/aseprite/skia/releases/download/${{ env.SKIA_RELEASE }}/${SKIA_FILE}
-          
-          # List the contents of the zip file for debugging
-          echo "Contents of the downloaded file:"
           file skia.zip
           
+          # Try to extract and fail if it's not a valid archive
           unzip -q skia.zip -d skia
           
           # List the extracted contents for debugging
@@ -173,7 +217,7 @@ jobs:
           cd $HOME/aseprite-source
           mkdir -p build
           cd build
-          cmake -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
           ninja aseprite
         shell: bash
 
@@ -183,17 +227,7 @@ jobs:
           cd $HOME/aseprite-source
           mkdir -p build
           cd build
-          
-          # Set additional flags for 32-bit builds
-          if [[ "${{ matrix.arch }}" == "x86" ]]; then
-            export CFLAGS="-m32"
-            export CXXFLAGS="-m32"
-            EXTRA_FLAGS="-DCMAKE_CXX_FLAGS=-m32 -DCMAKE_C_FLAGS=-m32"
-          else
-            EXTRA_FLAGS=""
-          fi
-          
-          cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a $EXTRA_FLAGS -G Ninja ..
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
           ninja aseprite
         shell: bash
 
@@ -290,9 +324,8 @@ jobs:
             
             ### Linux
             - Linux x64: Download the .tar.gz file and extract to use Aseprite
-            - Linux x86: Download the .tar.gz file and extract to use Aseprite
             
             ## Release Notes
             
             Built by: @BachMacThanh  
-            Build date: 2025-06-10 18:12:55
+            Build date: 2025-06-10 18:17:29
