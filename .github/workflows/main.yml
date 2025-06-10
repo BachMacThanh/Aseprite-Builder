@@ -37,7 +37,8 @@ jobs:
             "Skia-Windows-Release-x86.zip"
             "Skia-macOS-Release-x64.zip"
             "Skia-macOS-Release-arm64.zip"
-            "Skia-Linux-Release-x64-libc++.zip"
+            "Skia-Linux-Release-x64.zip"
+            "Skia-Linux-Release-x86.zip"
           )
           
           for FILE in "${SKIA_FILES[@]}"; do
@@ -63,6 +64,7 @@ jobs:
           - os: windows-latest
             platform: windows
             arch: x64
+            cmake_arch: x64
             artifact-name: aseprite-windows-x64
             installer-ext: zip
             inno-arch: "x64"
@@ -71,6 +73,7 @@ jobs:
           - os: windows-latest
             platform: windows
             arch: x86
+            cmake_arch: x86
             artifact-name: aseprite-windows-x86
             installer-ext: zip
             inno-arch: "x86"
@@ -79,28 +82,31 @@ jobs:
           - os: macos-latest
             platform: macos
             arch: x64
+            cmake_arch: x86_64
             artifact-name: aseprite-macos-intel
             installer-ext: zip
             skia_file: "Skia-macOS-Release-x64.zip"
           - os: macos-latest
             platform: macos
             arch: arm64
+            cmake_arch: arm64
             artifact-name: aseprite-macos-arm64
             installer-ext: zip
             skia_file: "Skia-macOS-Release-arm64.zip"
           - os: ubuntu-latest
             platform: linux
             arch: x64
+            cmake_arch: x64
             artifact-name: aseprite-linux-x64
             installer-ext: tar.gz
-            skia_file: "Skia-Linux-Release-x64-libc++.zip"
-          # Removing Linux x86 build as Skia doesn't provide binaries for it
-          # - os: ubuntu-latest
-          #   platform: linux
-          #   arch: x86
-          #   artifact-name: aseprite-linux-x86
-          #   installer-ext: tar.gz
-          #   skia_file: "Skia-Linux-Release-x86-libc++.zip"
+            skia_file: "Skia-Linux-Release-x64.zip"
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86
+            cmake_arch: x86
+            artifact-name: aseprite-linux-x86
+            installer-ext: tar.gz
+            skia_file: "Skia-Linux-Release-x86.zip"
 
     env:
       VERSION: ${{ needs.prepare.outputs.version }}
@@ -165,6 +171,13 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y g++ clang libc++-dev libc++abi-dev cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
           sudo apt-get install -y fuse libfuse2 libappindicator3-dev
+          
+          # For 32-bit builds
+          if [[ "${{ matrix.arch }}" == "x86" ]]; then
+            sudo dpkg --add-architecture i386
+            sudo apt-get update
+            sudo apt-get install -y gcc-multilib g++-multilib
+          fi
         shell: bash
 
       - name: Download pre-built Skia
@@ -217,7 +230,7 @@ jobs:
           cd $HOME/aseprite-source
           mkdir -p build
           cd build
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
           ninja aseprite
         shell: bash
 
@@ -227,7 +240,17 @@ jobs:
           cd $HOME/aseprite-source
           mkdir -p build
           cd build
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
+          
+          # Set additional flags for 32-bit builds
+          if [[ "${{ matrix.arch }}" == "x86" ]]; then
+            export CFLAGS="-m32"
+            export CXXFLAGS="-m32"
+            EXTRA_FLAGS="-DCMAKE_CXX_FLAGS=-m32 -DCMAKE_C_FLAGS=-m32"
+          else
+            EXTRA_FLAGS=""
+          fi
+          
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a $EXTRA_FLAGS -G Ninja ..
           ninja aseprite
         shell: bash
 
@@ -324,8 +347,9 @@ jobs:
             
             ### Linux
             - Linux x64: Download the .tar.gz file and extract to use Aseprite
+            - Linux x86: Download the .tar.gz file and extract to use Aseprite
             
             ## Release Notes
             
             Built by: @BachMacThanh  
-            Build date: 2025-06-10 18:17:29
+            Build date: 2025-06-10 18:22:46
