@@ -280,12 +280,21 @@ jobs:
           # Create a zip file for distribution
           7z a -tzip $HOME/aseprite-source/build/aseprite-${VERSION}-windows-${{ matrix.arch }}.zip .
         shell: bash
+        
+      - name: Copy Inno Setup script for Windows
+        if: matrix.platform == 'windows'
+        run: |
+          # Copy the ISS file to a location where Inno Setup can find it
+          mkdir -p D:/inno
+          cp $HOME/aseprite-source/inno/aseprite.iss D:/inno/
+          ls -la D:/inno/
+        shell: bash
 
       - name: Compile .ISS to .EXE Installer
         if: matrix.platform == 'windows'
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
-          path: $HOME/aseprite-source/inno/aseprite.iss
+          path: D:/inno/aseprite.iss
           options: /DAppVersion=${{ env.VERSION }} /DArchitecture=${{ matrix.inno-arch }} /DArchitecturesAllowed=${{ matrix.inno-allowed }}
 
       - name: Create macOS package
@@ -331,6 +340,7 @@ jobs:
           path: |
             $HOME/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}
             $HOME/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*-installer.exe
+            D:/inno/Output/setup*.exe
           retention-days: 7
 
   create-release:
@@ -381,5 +391,5 @@ jobs:
             
             ## Release Notes
             
-            Built by: @BachMacThanh  
-            Build date: 2025-06-10 18:33:13
+            Built by: @BachMacThanh1s
+            Build date: 2025-06-10 18:37:49
