@@ -169,7 +169,15 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y g++ clang libc++-dev libc++abi-dev cmake ninja-build libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
+          sudo apt-get install -y g++ clang libc++-dev libc++abi-dev cmake ninja-build 
+          
+          # Install X11 development libraries
+          sudo apt-get install -y libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev 
+          sudo apt-get install -y libfontconfig1-dev libxrandr-dev libxinerama-dev 
+          sudo apt-get install -y libxext-dev libxfixes-dev libxrender-dev libxcb1-dev 
+          sudo apt-get install -y libxcb-render0-dev libxcb-render-util0-dev
+          
+          # AppIndicator and other dependencies
           sudo apt-get install -y fuse libfuse2 libappindicator3-dev
           
           # For 32-bit builds
@@ -177,6 +185,10 @@ jobs:
             sudo dpkg --add-architecture i386
             sudo apt-get update
             sudo apt-get install -y gcc-multilib g++-multilib
+            sudo apt-get install -y libx11-dev:i386 libxcursor-dev:i386 
+            sudo apt-get install -y libxi-dev:i386 libgl1-mesa-dev:i386
+            sudo apt-get install -y libxrandr-dev:i386 libxinerama-dev:i386
+            sudo apt-get install -y libxext-dev:i386 libfontconfig1-dev:i386
           fi
         shell: bash
 
@@ -281,8 +293,26 @@ jobs:
         run: |
           cd $HOME/aseprite-source/build
           mkdir -p packaging/macos
-          cd bin
-          zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
+          
+          # Find out what files were actually created
+          echo "Directory contents of build directory:"
+          ls -la
+          echo "Directory contents of bin directory:"
+          ls -la bin
+          
+          # Create a package regardless of where the app is
+          if [ -d "bin/Aseprite.app" ]; then
+            echo "Found Aseprite.app in bin directory"
+            cd bin
+            zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
+          elif [ -d "Aseprite.app" ]; then
+            echo "Found Aseprite.app in build directory"
+            zip -r aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
+          else
+            echo "Aseprite.app not found, packaging all bin contents"
+            cd bin
+            zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip .
+          fi
         shell: bash
 
       - name: Create Linux package
@@ -352,4 +382,4 @@ jobs:
             ## Release Notes
             
             Built by: @BachMacThanh  
-            Build date: 2025-06-10 18:22:46
+            Build date: 2025-06-10 18:33:13
