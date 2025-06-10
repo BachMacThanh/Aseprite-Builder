@@ -86,12 +86,21 @@ jobs:
           # Extract the source code
           unzip -q aseprite-source.zip
           
-          # Move contents to the expected location
-          mv Aseprite-*/* .
-          
           # List the extracted contents for debugging
           echo "Extracted directory structure:"
           ls -la
+          
+          # Determine the actual directory structure and move files if needed
+          if [ -d "Aseprite-v${VERSION}" ]; then
+            echo "Moving files from Aseprite-v${VERSION} directory"
+            mv Aseprite-v${VERSION}/* .
+          elif [ -d "Aseprite-${VERSION}" ]; then
+            echo "Moving files from Aseprite-${VERSION} directory"
+            mv Aseprite-${VERSION}/* .
+          else
+            echo "Directory structure is already correct or different from expected"
+            find . -type d -maxdepth 1 | sort
+          fi
         shell: bash
 
       - name: Install dependencies (Windows)
@@ -152,7 +161,7 @@ jobs:
         if: matrix.platform == 'windows'
         run: |
           cd $HOME/aseprite-source
-          mkdir build
+          mkdir -p build
           cd build
           cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/skia.lib -G Ninja ..
           ninja aseprite
@@ -162,7 +171,7 @@ jobs:
         if: matrix.platform == 'macos'
         run: |
           cd $HOME/aseprite-source
-          mkdir build
+          mkdir -p build
           cd build
           cmake -DCMAKE_OSX_ARCHITECTURES=${{ matrix.arch }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
           ninja aseprite
@@ -172,7 +181,7 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           cd $HOME/aseprite-source
-          mkdir build
+          mkdir -p build
           cd build
           
           # Set additional flags for 32-bit builds
@@ -200,7 +209,7 @@ jobs:
           mkdir -p packaging/win
           cd $HOME/aseprite-source/build/bin
           # Create a zip file for distribution
-          7z a -tzip ../../aseprite-${VERSION}-windows-${{ matrix.arch }}.zip .
+          7z a -tzip $HOME/aseprite-source/build/aseprite-${VERSION}-windows-${{ matrix.arch }}.zip .
         shell: bash
 
       - name: Compile .ISS to .EXE Installer
@@ -216,7 +225,7 @@ jobs:
           cd $HOME/aseprite-source/build
           mkdir -p packaging/macos
           cd bin
-          zip -r ../../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
+          zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
         shell: bash
 
       - name: Create Linux package
@@ -225,7 +234,7 @@ jobs:
           cd $HOME/aseprite-source/build
           mkdir -p packaging/linux
           cd bin
-          tar -czvf ../../aseprite-${VERSION}-linux-${{ matrix.arch }}.tar.gz .
+          tar -czvf ../aseprite-${VERSION}-linux-${{ matrix.arch }}.tar.gz .
         shell: bash
 
       - name: Upload artifacts
@@ -286,4 +295,4 @@ jobs:
             ## Release Notes
             
             Built by: @BachMacThanh  
-            Build date: 2025-06-10 18:10:07
+            Build date: 2025-06-10 18:12:55
