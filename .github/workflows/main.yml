@@ -1,0 +1,207 @@
+name: Build and Release Aseprite
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
+
+jobs:
+  build:
+    name: Build on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            platform: windows
+            arch: x64
+            artifact-name: aseprite-windows-x64
+            installer-ext: zip
+            inno-arch: "x64"
+            inno-allowed: "x64"
+          - os: windows-latest
+            platform: windows
+            arch: x86
+            artifact-name: aseprite-windows-x86
+            installer-ext: zip
+            inno-arch: "x86"
+            inno-allowed: ""
+          - os: macos-latest
+            platform: macos
+            arch: x64
+            artifact-name: aseprite-macos-intel
+            installer-ext: zip
+          - os: macos-latest
+            platform: macos
+            arch: arm64
+            artifact-name: aseprite-macos-arm64
+            installer-ext: zip
+          - os: ubuntu-latest
+            platform: linux
+            arch: x64
+            artifact-name: aseprite-linux-x64
+            installer-ext: tar.gz
+          - os: ubuntu-latest
+            platform: linux
+            arch: x86
+            artifact-name: aseprite-linux-x86
+            installer-ext: tar.gz
+
+    steps:
+      - name: Checkout repository for configurations only
+        uses: actions/checkout@v3
+
+      - name: Get latest Aseprite release version
+        id: get_version
+        run: |
+          # Get the latest release information
+          LATEST_RELEASE_INFO=$(curl -s https://api.github.com/repos/aseprite/aseprite/releases/latest)
+          LATEST_TAG=$(echo "$LATEST_RELEASE_INFO" | grep -o '"tag_name": *"[^"]*"' | sed 's/"tag_name": *"//;s/"$//')
+          VERSION=${LATEST_TAG#v}  # Remove 'v' prefix if present
+          
+          echo "Latest Aseprite version: $VERSION (from tag $LATEST_TAG)"
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          
+          # Save version to file for other steps
+          echo "$VERSION" > version.txt
+        shell: bash
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        run: |
+          choco install innosetup
+        shell: bash
+
+      - name: Download latest Aseprite release
+        run: |
+          mkdir -p build/bin
+          cd build/bin
+          
+          # Format the download URL based on the matrix information
+          DOWNLOAD_URL="https://github.com/aseprite/aseprite/releases/download/v${{ env.VERSION }}/Aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.installer-ext }}"
+          
+          echo "Downloading Aseprite from $DOWNLOAD_URL"
+          curl -L -o aseprite-package.${{ matrix.installer-ext }} "$DOWNLOAD_URL"
+          
+          # Extract the package
+          if [[ "${{ matrix.installer-ext }}" == "zip" ]]; then
+            unzip -q aseprite-package.zip
+          elif [[ "${{ matrix.installer-ext }}" == "tar.gz" ]]; then
+            tar -xzf aseprite-package.tar.gz
+          fi
+          
+          # Clean up the downloaded package
+          rm aseprite-package.${{ matrix.installer-ext }}
+          
+          # List the extracted contents for debugging
+          echo "Extracted directory structure:"
+          ls -la
+        shell: bash
+
+      - name: 获取 "libcrypto-1_1-x64.dll"
+        if: matrix.platform == 'windows' && matrix.arch == 'x64'
+        shell: bash 
+        run: |
+          curl -L -o build/bin/libcrypto-1_1-x64.dll https://github.com/feenkcom/libopenssl/releases/download/v0.7.0/crypto-x86_64-pc-windows-msvc.dll
+
+      - name: Create Windows package
+        if: matrix.platform == 'windows'
+        run: |
+          mkdir -p packaging/win
+          cd build/bin
+          # Create a zip file for distribution
+          7z a -tzip ../../aseprite-${{ env.VERSION }}-windows-${{ matrix.arch }}.zip .
+        shell: bash
+
+      - name: Compile .ISS to .EXE Installer
+        if: matrix.platform == 'windows'
+        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
+        with:
+          path: inno/aseprite.iss
+          options: /DAppVersion=${{ env.VERSION }} /DArchitecture=${{ matrix.inno-arch }} /DArchitecturesAllowed=${{ matrix.inno-allowed }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: ${{ matrix.artifact-name }}
+          path: |
+            aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}
+            aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*-installer.exe
+          retention-days: 7
+
+      - name: Upload version info
+        uses: actions/upload-artifact@v4.6.2
+        with:
+          name: version-info
+          path: version.txt
+          retention-days: 7
+
+  create-release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Download version info
+        uses: actions/download-artifact@v4.1.4
+        with:
+          name: version-info
+          path: .
+
+      - name: Set version from file
+        id: get_version
+        run: |
+          VERSION=$(cat version.txt)
+          echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Using Aseprite version: $VERSION"
+        shell: bash
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4.1.4
+        with:
+          path: artifacts
+          pattern: aseprite-*
+
+      - name: List downloaded artifacts
+        run: |
+          find artifacts -type f | sort
+        shell: bash
+
+      - name: Create Release
+        id: create_release
+        uses: softprops/action-gh-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: Aseprite v${{ env.VERSION }}
+          draft: true
+          prerelease: false
+          files: |
+            artifacts/**/*
+          body: |
+            # Aseprite v${{ env.VERSION }}
+            
+            ## Packages
+            
+            ### Windows
+            - Windows x64: Download the .zip file and extract to use Aseprite, or use the installer (.exe)
+            - Windows x86: Download the .zip file and extract to use Aseprite, or use the installer (.exe)
+            
+            ### macOS
+            - macOS Intel (x64): Download the .zip file, extract, and move Aseprite.app to your Applications folder
+            - macOS Apple Silicon (arm64): Download the .zip file, extract, and move Aseprite.app to your Applications folder
+            
+            ### Linux
+            - Linux x64: Download the .tar.gz file and extract to use Aseprite
+            - Linux x86: Download the .tar.gz file and extract to use Aseprite
+            
+            ## Release Notes
+            
+            Built by: @BachMacThanh  
+            Build date: 2025-06-10
+            
+            This is a repackaged distribution of the official Aseprite release.
