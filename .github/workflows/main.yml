@@ -130,7 +130,11 @@ jobs:
             exit 1
           fi
           
+          # Verify it's a valid ZIP file
+          file aseprite-source.zip
+          
           # Extract the source code
+          echo "Extracting source code..."
           unzip -q aseprite-source.zip
           
           # List the extracted contents for debugging
@@ -141,15 +145,27 @@ jobs:
           if [ -d "Aseprite-v${VERSION}" ]; then
             echo "Moving files from Aseprite-v${VERSION} directory"
             mv Aseprite-v${VERSION}/* .
+            mv Aseprite-v${VERSION}/.* . 2>/dev/null || true  # Move hidden files, ignore errors
             rmdir Aseprite-v${VERSION}
           elif [ -d "Aseprite-${VERSION}" ]; then
             echo "Moving files from Aseprite-${VERSION} directory"
             mv Aseprite-${VERSION}/* .
+            mv Aseprite-${VERSION}/.* . 2>/dev/null || true  # Move hidden files, ignore errors
             rmdir Aseprite-${VERSION}
           else
             echo "Directory structure is already correct or different from expected"
             find . -type d -maxdepth 1 | sort
           fi
+          
+          # Verify we have the essential files
+          echo "=== Verifying source files ==="
+          if [ ! -f "CMakeLists.txt" ]; then
+            echo "ERROR: CMakeLists.txt not found after extraction"
+            exit 1
+          fi
+          
+          echo "Source extraction completed successfully"
+          ls -la
         shell: bash
 
       - name: Install dependencies (Windows)
@@ -237,26 +253,124 @@ jobs:
         if: matrix.platform == 'windows'
         run: |
           cd $HOME/aseprite-source
+          
+          # Check if we have the required source files
+          echo "=== Checking source directory structure ==="
+          ls -la
+          if [ ! -f "CMakeLists.txt" ]; then
+            echo "ERROR: CMakeLists.txt not found in source directory"
+            exit 1
+          fi
+          
+          # Check Skia dependency
+          echo "=== Checking Skia dependency ==="
+          if [ ! -d "$HOME/deps/skia" ]; then
+            echo "ERROR: Skia directory not found at $HOME/deps/skia"
+            exit 1
+          fi
+          ls -la $HOME/deps/skia/out/Release-${{ matrix.arch }}/
+          
           mkdir -p build
           cd build
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/skia.lib -G Ninja ..
+          
+          echo "=== Running CMake configuration ==="
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DLAF_BACKEND=skia \
+                -DSKIA_DIR=$HOME/deps/skia \
+                -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} \
+                -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/skia.lib \
+                -G Ninja ..
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: CMake configuration failed"
+            exit 1
+          fi
+          
+          echo "=== Running Ninja build ==="
           ninja aseprite
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Ninja build failed"
+            exit 1
+          fi
+          
+          echo "=== Build completed successfully ==="
+          ls -la bin/
         shell: bash
 
       - name: Configure and build (macOS)
         if: matrix.platform == 'macos'
         run: |
           cd $HOME/aseprite-source
+          
+          # Check if we have the required source files
+          echo "=== Checking source directory structure ==="
+          ls -la
+          if [ ! -f "CMakeLists.txt" ]; then
+            echo "ERROR: CMakeLists.txt not found in source directory"
+            exit 1
+          fi
+          
+          # Check Skia dependency
+          echo "=== Checking Skia dependency ==="
+          if [ ! -d "$HOME/deps/skia" ]; then
+            echo "ERROR: Skia directory not found at $HOME/deps/skia"
+            exit 1
+          fi
+          ls -la $HOME/deps/skia/out/Release-${{ matrix.arch }}/
+          
           mkdir -p build
           cd build
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }} -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a -G Ninja ..
+          
+          echo "=== Running CMake configuration ==="
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }} \
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DLAF_BACKEND=skia \
+                -DSKIA_DIR=$HOME/deps/skia \
+                -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} \
+                -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a \
+                -G Ninja ..
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: CMake configuration failed"
+            exit 1
+          fi
+          
+          echo "=== Running Ninja build ==="
           ninja aseprite
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Ninja build failed"
+            exit 1
+          fi
+          
+          echo "=== Build completed successfully ==="
+          ls -la bin/
         shell: bash
 
       - name: Configure and build (Linux)
         if: matrix.platform == 'linux'
         run: |
           cd $HOME/aseprite-source
+          
+          # Check if we have the required source files
+          echo "=== Checking source directory structure ==="
+          ls -la
+          if [ ! -f "CMakeLists.txt" ]; then
+            echo "ERROR: CMakeLists.txt not found in source directory"
+            exit 1
+          fi
+          
+          # Check Skia dependency
+          echo "=== Checking Skia dependency ==="
+          if [ ! -d "$HOME/deps/skia" ]; then
+            echo "ERROR: Skia directory not found at $HOME/deps/skia"
+            exit 1
+          fi
+          ls -la $HOME/deps/skia/out/Release-${{ matrix.arch }}/
+          
           mkdir -p build
           cd build
           
@@ -270,6 +384,7 @@ jobs:
             EXTRA_FLAGS=""
           fi
           
+          echo "=== Running CMake configuration ==="
           # Configure with additional flags to help libarchive detection
           cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
                 -DCMAKE_BUILD_TYPE=RelWithDebInfo \
@@ -280,7 +395,22 @@ jobs:
                 -DENABLE_TESTS=OFF \
                 $EXTRA_FLAGS \
                 -G Ninja ..
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: CMake configuration failed"
+            exit 1
+          fi
+          
+          echo "=== Running Ninja build ==="
           ninja aseprite
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Ninja build failed"
+            exit 1
+          fi
+          
+          echo "=== Build completed successfully ==="
+          ls -la bin/
         shell: bash
 
       - name: 获取 "libcrypto-1_1-x64.dll"
@@ -292,10 +422,28 @@ jobs:
       - name: Create Windows package
         if: matrix.platform == 'windows'
         run: |
-          mkdir -p packaging/win
           cd $HOME/aseprite-source/build/bin
+          
+          echo "=== Contents of bin directory before packaging ==="
+          ls -la
+          
+          # Check if aseprite.exe exists
+          if [ ! -f "aseprite.exe" ]; then
+            echo "ERROR: aseprite.exe not found in bin directory"
+            exit 1
+          fi
+          
           # Create a zip file for distribution
+          echo "=== Creating ZIP package ==="
           7z a -tzip $HOME/aseprite-source/build/aseprite-${VERSION}-windows-${{ matrix.arch }}.zip .
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to create ZIP package"
+            exit 1
+          fi
+          
+          echo "=== Package created successfully ==="
+          ls -la $HOME/aseprite-source/build/aseprite-*.zip
         shell: bash
         
       - name: Copy Inno Setup script for Windows
@@ -303,7 +451,51 @@ jobs:
         run: |
           # Copy the ISS file to a location where Inno Setup can find it
           mkdir -p D:/inno
-          cp $HOME/aseprite-source/inno/aseprite.iss D:/inno/
+          
+          # Check if the ISS file exists in the source, if not create a basic one
+          if [ -f "$HOME/aseprite-source/inno/aseprite.iss" ]; then
+            cp $HOME/aseprite-source/inno/aseprite.iss D:/inno/
+          else
+            echo "Creating basic Inno Setup script since none exists in source"
+            cat > D:/inno/aseprite.iss << 'EOF'
+[Setup]
+AppId={{A4C4C8FB-73E4-4C6F-B98F-0F4E2F5D6C89}
+AppName=Aseprite
+AppVersion={#AppVersion}
+AppPublisher=Igara Studio S.A.
+AppPublisherURL=https://www.aseprite.org/
+AppSupportURL=https://www.aseprite.org/
+AppUpdatesURL=https://www.aseprite.org/
+DefaultDirName={autopf}\Aseprite
+DefaultGroupName=Aseprite
+AllowNoIcons=yes
+LicenseFile=
+OutputDir=D:\inno\Output
+OutputBaseFilename=setup-aseprite-{#AppVersion}-{#Architecture}
+SetupIconFile=
+Compression=lzma
+SolidCompression=yes
+WizardStyle=modern
+ArchitecturesAllowed={#ArchitecturesAllowed}
+ArchitecturesInstallIn64BitMode=x64
+
+[Languages]
+Name: "english"; MessagesFile: "compiler:Default.isl"
+
+[Tasks]
+Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[Files]
+Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Icons]
+Name: "{group}\{cm:UninstallProgram,Aseprite}"; Filename: "{uninstallexe}"
+Name: "{autodesktop}\Aseprite"; Filename: "{app}\aseprite.exe"; Tasks: desktopicon
+
+[Run]
+Filename: "{app}\aseprite.exe"; Description: "{cm:LaunchProgram,Aseprite}"; Flags: nowait postinstall skipifsilent
+EOF
+          fi
           ls -la D:/inno/
         shell: bash
 
@@ -312,56 +504,95 @@ jobs:
         uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
         with:
           path: D:/inno/aseprite.iss
-          options: /DAppVersion=${{ env.VERSION }} /DArchitecture=${{ matrix.inno-arch }} /DArchitecturesAllowed=${{ matrix.inno-allowed }}
+          options: /DAppVersion=${{ env.VERSION }} /DArchitecture=${{ matrix.inno-arch }} /DArchitecturesAllowed=${{ matrix.inno-allowed }} /DSourceDir=${{ env.HOME }}/aseprite-source/build/bin
 
       - name: Create macOS package
         if: matrix.platform == 'macos'
         run: |
           cd $HOME/aseprite-source/build
-          mkdir -p packaging/macos
           
-          # Find out what files were actually created
-          echo "Directory contents of build directory:"
+          echo "=== Contents of build directory ==="
           ls -la
-          echo "Directory contents of bin directory:"
-          ls -la bin
           
-          # Create a package regardless of where the app is
+          echo "=== Contents of bin directory ==="
+          ls -la bin/
+          
+          # Create a package based on what's available
           if [ -d "bin/Aseprite.app" ]; then
-            echo "Found Aseprite.app in bin directory"
+            echo "=== Found Aseprite.app in bin directory ==="
             cd bin
             zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
           elif [ -d "Aseprite.app" ]; then
-            echo "Found Aseprite.app in build directory"
+            echo "=== Found Aseprite.app in build directory ==="
             zip -r aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
-          else
-            echo "Aseprite.app not found, packaging all bin contents"
+          elif [ -f "bin/aseprite" ]; then
+            echo "=== Found aseprite binary, packaging bin contents ==="
             cd bin
             zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip .
+          else
+            echo "ERROR: Neither Aseprite.app nor aseprite binary found"
+            exit 1
           fi
+          
+          echo "=== Package created successfully ==="
+          ls -la $HOME/aseprite-source/build/aseprite-*.zip
         shell: bash
 
       - name: Create Linux package
         if: matrix.platform == 'linux'
         run: |
           cd $HOME/aseprite-source/build
-          mkdir -p packaging/linux
+          
+          echo "=== Contents of build directory ==="
+          ls -la
+          
+          echo "=== Contents of bin directory ==="
+          ls -la bin/
+          
+          # Check if aseprite binary exists
+          if [ ! -f "bin/aseprite" ]; then
+            echo "ERROR: aseprite binary not found in bin directory"
+            exit 1
+          fi
+          
           cd bin
+          echo "=== Creating tar.gz package ==="
           tar -czvf ../aseprite-${VERSION}-linux-${{ matrix.arch }}.tar.gz .
+          
+          if [ $? -ne 0 ]; then
+            echo "ERROR: Failed to create tar.gz package"
+            exit 1
+          fi
+          
+          echo "=== Package created successfully ==="
+          ls -la $HOME/aseprite-source/build/aseprite-*.tar.gz
         shell: bash
 
       - name: List files before upload
         run: |
+          echo "=== Environment Variables ==="
+          echo "HOME: $HOME"
+          echo "VERSION: $VERSION"
+          echo "Platform: ${{ matrix.platform }}"
+          echo "Arch: ${{ matrix.arch }}"
+          echo "Installer ext: ${{ matrix.installer-ext }}"
+          
           echo "=== Files in build directory ==="
-          find $HOME/aseprite-source/build -name "aseprite-*" -type f 2>/dev/null || echo "No aseprite-* files found"
-          echo "=== All files in build directory ==="
           ls -la $HOME/aseprite-source/build/ 2>/dev/null || echo "Build directory not found"
+          
+          echo "=== Aseprite package files ==="
+          find $HOME/aseprite-source/build -name "aseprite-*" -type f 2>/dev/null || echo "No aseprite-* files found"
+          
           echo "=== Windows Inno Setup Output ==="
           if [ -d "D:/inno/Output" ]; then
             ls -la D:/inno/Output/
           else
-            echo "D:/inno/Output directory not found"
+            echo "D:/inno/Output directory not found (expected for non-Windows builds)"
           fi
+          
+          echo "=== Complete file listing for upload patterns ==="
+          echo "Looking for: $HOME/aseprite-source/build/aseprite-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}"
+          ls -la $HOME/aseprite-source/build/aseprite-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }} 2>/dev/null || echo "No files match upload pattern"
         shell: bash
 
       - name: Upload artifacts
@@ -369,11 +600,7 @@ jobs:
         with:
           name: ${{ matrix.artifact-name }}
           path: |
-            /Users/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.zip
-            /Users/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.tar.gz
-            /home/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.zip
-            /home/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.tar.gz
-            C:/Users/runneradmin/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.zip
+            ${{ env.HOME }}/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}
             D:/inno/Output/*.exe
           retention-days: 7
           if-no-files-found: warn
