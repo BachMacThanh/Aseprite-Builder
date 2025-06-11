@@ -350,15 +350,33 @@ jobs:
           tar -czvf ../aseprite-${VERSION}-linux-${{ matrix.arch }}.tar.gz .
         shell: bash
 
+      - name: List files before upload
+        run: |
+          echo "=== Files in build directory ==="
+          find $HOME/aseprite-source/build -name "aseprite-*" -type f 2>/dev/null || echo "No aseprite-* files found"
+          echo "=== All files in build directory ==="
+          ls -la $HOME/aseprite-source/build/ 2>/dev/null || echo "Build directory not found"
+          echo "=== Windows Inno Setup Output ==="
+          if [ -d "D:/inno/Output" ]; then
+            ls -la D:/inno/Output/
+          else
+            echo "D:/inno/Output directory not found"
+          fi
+        shell: bash
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v4.6.2
         with:
           name: ${{ matrix.artifact-name }}
           path: |
-            $HOME/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}
-            $HOME/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*-installer.exe
-            D:/inno/Output/setup*.exe
+            /Users/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.zip
+            /Users/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.tar.gz
+            /home/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.zip
+            /home/runner/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.tar.gz
+            C:/Users/runneradmin/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.zip
+            D:/inno/Output/*.exe
           retention-days: 7
+          if-no-files-found: warn
 
   create-release:
     name: Create Release
@@ -409,4 +427,4 @@ jobs:
             ## Release Notes
             
             Built by: @BachMacThanh  
-            Build date: 2025-06-11 04:16:00
+            Build date: 2025-06-11 04:20:09
