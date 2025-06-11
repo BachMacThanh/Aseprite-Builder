@@ -459,7 +459,7 @@ jobs:
             echo "Creating basic Inno Setup script since none exists in source"
             cat > D:/inno/aseprite.iss << 'EOFISS'
           [Setup]
-          AppId={{A4C4C8FB-73E4-4C6F-B98F-0F4E2F5D6C89}
+          AppId={{A4C4C8FB-73E4-4C6F-B98F-0F4E2F5D6C89}}
           AppName=Aseprite
           AppVersion={#AppVersion}
           AppPublisher=Igara Studio S.A.
