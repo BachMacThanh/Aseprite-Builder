@@ -457,44 +457,44 @@ jobs:
             cp $HOME/aseprite-source/inno/aseprite.iss D:/inno/
           else
             echo "Creating basic Inno Setup script since none exists in source"
-            cat > D:/inno/aseprite.iss << 'EOF'
-[Setup]
-AppId={{A4C4C8FB-73E4-4C6F-B98F-0F4E2F5D6C89}
-AppName=Aseprite
-AppVersion={#AppVersion}
-AppPublisher=Igara Studio S.A.
-AppPublisherURL=https://www.aseprite.org/
-AppSupportURL=https://www.aseprite.org/
-AppUpdatesURL=https://www.aseprite.org/
-DefaultDirName={autopf}\Aseprite
-DefaultGroupName=Aseprite
-AllowNoIcons=yes
-LicenseFile=
-OutputDir=D:\inno\Output
-OutputBaseFilename=setup-aseprite-{#AppVersion}-{#Architecture}
-SetupIconFile=
-Compression=lzma
-SolidCompression=yes
-WizardStyle=modern
-ArchitecturesAllowed={#ArchitecturesAllowed}
-ArchitecturesInstallIn64BitMode=x64
-
-[Languages]
-Name: "english"; MessagesFile: "compiler:Default.isl"
-
-[Tasks]
-Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-
-[Files]
-Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-
-[Icons]
-Name: "{group}\{cm:UninstallProgram,Aseprite}"; Filename: "{uninstallexe}"
-Name: "{autodesktop}\Aseprite"; Filename: "{app}\aseprite.exe"; Tasks: desktopicon
-
-[Run]
-Filename: "{app}\aseprite.exe"; Description: "{cm:LaunchProgram,Aseprite}"; Flags: nowait postinstall skipifsilent
-EOF
+            cat > D:/inno/aseprite.iss << 'EOFISS'
+          [Setup]
+          AppId={{A4C4C8FB-73E4-4C6F-B98F-0F4E2F5D6C89}
+          AppName=Aseprite
+          AppVersion={#AppVersion}
+          AppPublisher=Igara Studio S.A.
+          AppPublisherURL=https://www.aseprite.org/
+          AppSupportURL=https://www.aseprite.org/
+          AppUpdatesURL=https://www.aseprite.org/
+          DefaultDirName={autopf}\Aseprite
+          DefaultGroupName=Aseprite
+          AllowNoIcons=yes
+          LicenseFile=
+          OutputDir=D:\inno\Output
+          OutputBaseFilename=setup-aseprite-{#AppVersion}-{#Architecture}
+          SetupIconFile=
+          Compression=lzma
+          SolidCompression=yes
+          WizardStyle=modern
+          ArchitecturesAllowed={#ArchitecturesAllowed}
+          ArchitecturesInstallIn64BitMode=x64
+          
+          [Languages]
+          Name: "english"; MessagesFile: "compiler:Default.isl"
+          
+          [Tasks]
+          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+          
+          [Files]
+          Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+          
+          [Icons]
+          Name: "{group}\{cm:UninstallProgram,Aseprite}"; Filename: "{uninstallexe}"
+          Name: "{autodesktop}\Aseprite"; Filename: "{app}\aseprite.exe"; Tasks: desktopicon
+          
+          [Run]
+          Filename: "{app}\aseprite.exe"; Description: "{cm:LaunchProgram,Aseprite}"; Flags: nowait postinstall skipifsilent
+          EOFISS
           fi
           ls -la D:/inno/
         shell: bash
