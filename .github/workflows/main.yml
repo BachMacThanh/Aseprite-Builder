@@ -177,6 +177,10 @@ jobs:
           sudo apt-get install -y libxext-dev libxfixes-dev libxrender-dev libxcb1-dev 
           sudo apt-get install -y libxcb-render0-dev libxcb-render-util0-dev
           
+          # Additional dependencies for libarchive
+          sudo apt-get install -y liblzma-dev libbz2-dev libzstd-dev liblz4-dev
+          sudo apt-get install -y libacl1-dev libattr1-dev
+          
           # AppIndicator and other dependencies
           sudo apt-get install -y fuse libfuse2 libappindicator3-dev
           
@@ -189,6 +193,9 @@ jobs:
             sudo apt-get install -y libxi-dev:i386 libgl1-mesa-dev:i386
             sudo apt-get install -y libxrandr-dev:i386 libxinerama-dev:i386
             sudo apt-get install -y libxext-dev:i386 libfontconfig1-dev:i386
+            # 32-bit libarchive dependencies
+            sudo apt-get install -y liblzma-dev:i386 libbz2-dev:i386 libzstd-dev:i386
+            sudo apt-get install -y libacl1-dev:i386 libattr1-dev:i386
           fi
         shell: bash
 
@@ -257,12 +264,22 @@ jobs:
           if [[ "${{ matrix.arch }}" == "x86" ]]; then
             export CFLAGS="-m32"
             export CXXFLAGS="-m32"
-            EXTRA_FLAGS="-DCMAKE_CXX_FLAGS=-m32 -DCMAKE_C_FLAGS=-m32"
+            export LDFLAGS="-m32"
+            EXTRA_FLAGS="-DCMAKE_CXX_FLAGS=-m32 -DCMAKE_C_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32"
           else
             EXTRA_FLAGS=""
           fi
           
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 -DCMAKE_BUILD_TYPE=RelWithDebInfo -DLAF_BACKEND=skia -DSKIA_DIR=$HOME/deps/skia -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a $EXTRA_FLAGS -G Ninja ..
+          # Configure with additional flags to help libarchive detection
+          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+                -DLAF_BACKEND=skia \
+                -DSKIA_DIR=$HOME/deps/skia \
+                -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} \
+                -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a \
+                -DENABLE_TESTS=OFF \
+                $EXTRA_FLAGS \
+                -G Ninja ..
           ninja aseprite
         shell: bash
 
@@ -391,5 +408,5 @@ jobs:
             
             ## Release Notes
             
-            Built by: @BachMacThanh1s
-            Build date: 2025-06-10 18:37:49
+            Built by: @BachMacThanh  
+            Build date: 2025-06-11 04:16:00
