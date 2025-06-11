@@ -1,657 +1,172 @@
-name: Build and Release Aseprite
+name: Build and deploy Aseprite
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
-  schedule:
-    - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
+    inputs:
+      run_fetch:
+        description: 'Run fetch-aseprite-info job?'
+        required: false
+        default: 'true'
+      run_create:
+        description: 'Run create-release job?'
+        required: false
+        default: 'true'
+      run_build:
+        description: 'Run build-aseprite job?'
+        required: false
+        default: 'true'
+
+env:
+  BUILD_TYPE: Release
 
 jobs:
-  prepare:
-    name: Get Latest Version and Check Skia Availability
+  fetch-aseprite-info:
+    name: Fetch deps info
+    if: >
+      github.event_name != 'workflow_dispatch'
+      || github.event.inputs.run_fetch == 'true'
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.get_version.outputs.version }}
-      skia_release: ${{ steps.check_skia.outputs.skia_release }}
+      download-link: ${{ steps.aseprite-link.outputs.download-link }}
+      release-tag:    ${{ steps.aseprite-link.outputs.release-tag }}
     steps:
-      - name: Get latest Aseprite release version
-        id: get_version
-        run: |
-          # Get the latest release information
-          LATEST_RELEASE_INFO=$(curl -s https://api.github.com/repos/aseprite/aseprite/releases/latest)
-          LATEST_TAG=$(echo "$LATEST_RELEASE_INFO" | grep -o '"tag_name": *"[^"]*"' | sed 's/"tag_name": *"//;s/"$//')
-          VERSION=${LATEST_TAG#v}  # Remove 'v' prefix if present
-          
-          echo "Latest Aseprite version: $VERSION (from tag $LATEST_TAG)"
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-        shell: bash
-        
-      - name: Check latest Skia release
-        id: check_skia
-        run: |
-          # Find the latest Skia release that's compatible with Aseprite
-          SKIA_RELEASE="m124-08a5439a6b"
-          
-          # Verify if the Skia files exist for all platforms
-          SKIA_FILES=(
-            "Skia-Windows-Release-x64.zip"
-            "Skia-Windows-Release-x86.zip"
-            "Skia-macOS-Release-x64.zip"
-            "Skia-macOS-Release-arm64.zip"
-            "Skia-Linux-Release-x64.zip"
-            "Skia-Linux-Release-x86.zip"
-          )
-          
-          for FILE in "${SKIA_FILES[@]}"; do
-            URL="https://github.com/aseprite/skia/releases/download/${SKIA_RELEASE}/${FILE}"
-            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "${URL}")
-            echo "Checking ${URL}: ${HTTP_CODE}"
-            if [[ "${HTTP_CODE}" != "200" && "${HTTP_CODE}" != "302" ]]; then
-              echo "Warning: Could not find ${FILE} in release ${SKIA_RELEASE}"
-            fi
-          done
-          
-          echo "skia_release=${SKIA_RELEASE}" >> $GITHUB_OUTPUT
-        shell: bash
-
-  build:
-    name: Build on ${{ matrix.os }}
-    needs: prepare
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            platform: windows
-            arch: x64
-            cmake_arch: x64
-            artifact-name: aseprite-windows-x64
-            installer-ext: zip
-            inno-arch: "x64"
-            inno-allowed: "x64"
-            skia_file: "Skia-Windows-Release-x64.zip"
-          - os: windows-latest
-            platform: windows
-            arch: x86
-            cmake_arch: x86
-            artifact-name: aseprite-windows-x86
-            installer-ext: zip
-            inno-arch: "x86"
-            inno-allowed: ""
-            skia_file: "Skia-Windows-Release-x86.zip"
-          - os: macos-latest
-            platform: macos
-            arch: x64
-            cmake_arch: x86_64
-            artifact-name: aseprite-macos-intel
-            installer-ext: zip
-            skia_file: "Skia-macOS-Release-x64.zip"
-          - os: macos-latest
-            platform: macos
-            arch: arm64
-            cmake_arch: arm64
-            artifact-name: aseprite-macos-arm64
-            installer-ext: zip
-            skia_file: "Skia-macOS-Release-arm64.zip"
-          - os: ubuntu-latest
-            platform: linux
-            arch: x64
-            cmake_arch: x64
-            artifact-name: aseprite-linux-x64
-            installer-ext: tar.gz
-            skia_file: "Skia-Linux-Release-x64.zip"
-          - os: ubuntu-latest
-            platform: linux
-            arch: x86
-            cmake_arch: x86
-            artifact-name: aseprite-linux-x86
-            installer-ext: tar.gz
-            skia_file: "Skia-Linux-Release-x86.zip"
-
-    env:
-      VERSION: ${{ needs.prepare.outputs.version }}
-      SKIA_RELEASE: ${{ needs.prepare.outputs.skia_release }}
-
-    steps:
-      - name: Download Aseprite source code
-        run: |
-          mkdir -p $HOME/aseprite-source
-          cd $HOME/aseprite-source
-          
-          # Format the download URL
-          DOWNLOAD_URL="https://github.com/aseprite/aseprite/releases/download/v${VERSION}/Aseprite-v${VERSION}-Source.zip"
-          
-          echo "Downloading Aseprite source from $DOWNLOAD_URL"
-          curl -L -o aseprite-source.zip "$DOWNLOAD_URL"
-          
-          # Check if download was successful
-          if [ ! -s aseprite-source.zip ]; then
-            echo "Failed to download Aseprite source code"
-            exit 1
-          fi
-          
-          # Verify it's a valid ZIP file
-          file aseprite-source.zip
-          
-          # Extract the source code
-          echo "Extracting source code..."
-          unzip -q aseprite-source.zip
-          
-          # List the extracted contents for debugging
-          echo "Extracted directory structure:"
-          ls -la
-          
-          # Determine the actual directory structure and move files if needed
-          if [ -d "Aseprite-v${VERSION}" ]; then
-            echo "Moving files from Aseprite-v${VERSION} directory"
-            mv Aseprite-v${VERSION}/* .
-            mv Aseprite-v${VERSION}/.* . 2>/dev/null || true  # Move hidden files, ignore errors
-            rmdir Aseprite-v${VERSION}
-          elif [ -d "Aseprite-${VERSION}" ]; then
-            echo "Moving files from Aseprite-${VERSION} directory"
-            mv Aseprite-${VERSION}/* .
-            mv Aseprite-${VERSION}/.* . 2>/dev/null || true  # Move hidden files, ignore errors
-            rmdir Aseprite-${VERSION}
-          else
-            echo "Directory structure is already correct or different from expected"
-            find . -type d -maxdepth 1 | sort
-          fi
-          
-          # Verify we have the essential files
-          echo "=== Verifying source files ==="
-          if [ ! -f "CMakeLists.txt" ]; then
-            echo "ERROR: CMakeLists.txt not found after extraction"
-            exit 1
-          fi
-          
-          echo "Source extraction completed successfully"
-          ls -la
-        shell: bash
-
-      - name: Install dependencies (Windows)
-        if: matrix.platform == 'windows'
-        run: |
-          choco install ninja cmake --installargs 'ADD_CMAKE_TO_PATH=System'
-          choco install innosetup
-        shell: bash
-
-      - name: Install dependencies (macOS)
-        if: matrix.platform == 'macos'
-        run: |
-          brew install ninja cmake
-        shell: bash
-
-      - name: Install dependencies (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y g++ clang libc++-dev libc++abi-dev cmake ninja-build 
-          
-          # Install X11 development libraries
-          sudo apt-get install -y libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev 
-          sudo apt-get install -y libfontconfig1-dev libxrandr-dev libxinerama-dev 
-          sudo apt-get install -y libxext-dev libxfixes-dev libxrender-dev libxcb1-dev 
-          sudo apt-get install -y libxcb-render0-dev libxcb-render-util0-dev
-          
-          # Additional dependencies for libarchive
-          sudo apt-get install -y liblzma-dev libbz2-dev libzstd-dev liblz4-dev
-          sudo apt-get install -y libacl1-dev libattr1-dev
-          
-          # AppIndicator and other dependencies
-          sudo apt-get install -y fuse libfuse2 libappindicator3-dev
-          
-          # For 32-bit builds
-          if [[ "${{ matrix.arch }}" == "x86" ]]; then
-            sudo dpkg --add-architecture i386
-            sudo apt-get update
-            sudo apt-get install -y gcc-multilib g++-multilib
-            sudo apt-get install -y libx11-dev:i386 libxcursor-dev:i386 
-            sudo apt-get install -y libxi-dev:i386 libgl1-mesa-dev:i386
-            sudo apt-get install -y libxrandr-dev:i386 libxinerama-dev:i386
-            sudo apt-get install -y libxext-dev:i386 libfontconfig1-dev:i386
-            # 32-bit libarchive dependencies
-            sudo apt-get install -y liblzma-dev:i386 libbz2-dev:i386 libzstd-dev:i386
-            sudo apt-get install -y libacl1-dev:i386 libattr1-dev:i386
-          fi
-        shell: bash
-
-      - name: Download pre-built Skia
-        run: |
-          mkdir -p $HOME/deps
-          cd $HOME/deps
-          echo "Downloading Skia for ${{ matrix.platform }}-${{ matrix.arch }} from release ${{ env.SKIA_RELEASE }}..."
-          
-          SKIA_URL="https://github.com/aseprite/skia/releases/download/${{ env.SKIA_RELEASE }}/${{ matrix.skia_file }}"
-          echo "Download URL: ${SKIA_URL}"
-          
-          # Use -f flag to fail on server errors
-          curl -L -f -o skia.zip "${SKIA_URL}"
-          
-          # Check if download was successful and file is a zip
-          if [ ! -s skia.zip ]; then
-            echo "Failed to download Skia binaries"
-            exit 1
-          fi
-          
-          file skia.zip
-          
-          # Try to extract and fail if it's not a valid archive
-          unzip -q skia.zip -d skia
-          
-          # List the extracted contents for debugging
-          echo "Extracted directory structure:"
-          find skia -type d | sort
-        shell: bash
-
-      - name: Set up MSVC (Windows)
-        if: matrix.platform == 'windows'
-        uses: ilammy/msvc-dev-cmd@v1
+      - name: Fetch Aseprite release link
+        id: aseprite-link
+        uses: a1393323447/fetch-release@main
         with:
-          arch: ${{ matrix.arch }}
-
-      - name: Configure and build (Windows)
-        if: matrix.platform == 'windows'
-        run: |
-          cd $HOME/aseprite-source
-          
-          # Check if we have the required source files
-          echo "=== Checking source directory structure ==="
-          ls -la
-          if [ ! -f "CMakeLists.txt" ]; then
-            echo "ERROR: CMakeLists.txt not found in source directory"
-            exit 1
-          fi
-          
-          # Check Skia dependency
-          echo "=== Checking Skia dependency ==="
-          if [ ! -d "$HOME/deps/skia" ]; then
-            echo "ERROR: Skia directory not found at $HOME/deps/skia"
-            exit 1
-          fi
-          ls -la $HOME/deps/skia/out/Release-${{ matrix.arch }}/
-          
-          mkdir -p build
-          cd build
-          
-          echo "=== Running CMake configuration ==="
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DLAF_BACKEND=skia \
-                -DSKIA_DIR=$HOME/deps/skia \
-                -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} \
-                -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/skia.lib \
-                -G Ninja ..
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: CMake configuration failed"
-            exit 1
-          fi
-          
-          echo "=== Running Ninja build ==="
-          ninja aseprite
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Ninja build failed"
-            exit 1
-          fi
-          
-          echo "=== Build completed successfully ==="
-          ls -la bin/
-        shell: bash
-
-      - name: Configure and build (macOS)
-        if: matrix.platform == 'macos'
-        run: |
-          cd $HOME/aseprite-source
-          
-          # Check if we have the required source files
-          echo "=== Checking source directory structure ==="
-          ls -la
-          if [ ! -f "CMakeLists.txt" ]; then
-            echo "ERROR: CMakeLists.txt not found in source directory"
-            exit 1
-          fi
-          
-          # Check Skia dependency
-          echo "=== Checking Skia dependency ==="
-          if [ ! -d "$HOME/deps/skia" ]; then
-            echo "ERROR: Skia directory not found at $HOME/deps/skia"
-            exit 1
-          fi
-          ls -la $HOME/deps/skia/out/Release-${{ matrix.arch }}/
-          
-          mkdir -p build
-          cd build
-          
-          echo "=== Running CMake configuration ==="
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-                -DCMAKE_OSX_ARCHITECTURES=${{ matrix.cmake_arch }} \
-                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DLAF_BACKEND=skia \
-                -DSKIA_DIR=$HOME/deps/skia \
-                -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} \
-                -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a \
-                -G Ninja ..
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: CMake configuration failed"
-            exit 1
-          fi
-          
-          echo "=== Running Ninja build ==="
-          ninja aseprite
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Ninja build failed"
-            exit 1
-          fi
-          
-          echo "=== Build completed successfully ==="
-          ls -la bin/
-        shell: bash
-
-      - name: Configure and build (Linux)
-        if: matrix.platform == 'linux'
-        run: |
-          cd $HOME/aseprite-source
-          
-          # Check if we have the required source files
-          echo "=== Checking source directory structure ==="
-          ls -la
-          if [ ! -f "CMakeLists.txt" ]; then
-            echo "ERROR: CMakeLists.txt not found in source directory"
-            exit 1
-          fi
-          
-          # Check Skia dependency
-          echo "=== Checking Skia dependency ==="
-          if [ ! -d "$HOME/deps/skia" ]; then
-            echo "ERROR: Skia directory not found at $HOME/deps/skia"
-            exit 1
-          fi
-          ls -la $HOME/deps/skia/out/Release-${{ matrix.arch }}/
-          
-          mkdir -p build
-          cd build
-          
-          # Set additional flags for 32-bit builds
-          if [[ "${{ matrix.arch }}" == "x86" ]]; then
-            export CFLAGS="-m32"
-            export CXXFLAGS="-m32"
-            export LDFLAGS="-m32"
-            EXTRA_FLAGS="-DCMAKE_CXX_FLAGS=-m32 -DCMAKE_C_FLAGS=-m32 -DCMAKE_EXE_LINKER_FLAGS=-m32"
-          else
-            EXTRA_FLAGS=""
-          fi
-          
-          echo "=== Running CMake configuration ==="
-          # Configure with additional flags to help libarchive detection
-          cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
-                -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-                -DLAF_BACKEND=skia \
-                -DSKIA_DIR=$HOME/deps/skia \
-                -DSKIA_LIBRARY_DIR=$HOME/deps/skia/out/Release-${{ matrix.arch }} \
-                -DSKIA_LIBRARY=$HOME/deps/skia/out/Release-${{ matrix.arch }}/libskia.a \
-                -DENABLE_TESTS=OFF \
-                $EXTRA_FLAGS \
-                -G Ninja ..
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: CMake configuration failed"
-            exit 1
-          fi
-          
-          echo "=== Running Ninja build ==="
-          ninja aseprite
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Ninja build failed"
-            exit 1
-          fi
-          
-          echo "=== Build completed successfully ==="
-          ls -la bin/
-        shell: bash
-
-      - name: 获取 "libcrypto-1_1-x64.dll"
-        if: matrix.platform == 'windows' && matrix.arch == 'x64'
-        shell: bash 
-        run: |
-          curl -L -o $HOME/aseprite-source/build/bin/libcrypto-1_1-x64.dll https://github.com/feenkcom/libopenssl/releases/download/v0.7.0/crypto-x86_64-pc-windows-msvc.dll
-
-      - name: Create Windows package
-        if: matrix.platform == 'windows'
-        run: |
-          cd $HOME/aseprite-source/build/bin
-          
-          echo "=== Contents of bin directory before packaging ==="
-          ls -la
-          
-          # Check if aseprite.exe exists
-          if [ ! -f "aseprite.exe" ]; then
-            echo "ERROR: aseprite.exe not found in bin directory"
-            exit 1
-          fi
-          
-          # Create a zip file for distribution
-          echo "=== Creating ZIP package ==="
-          7z a -tzip $HOME/aseprite-source/build/aseprite-${VERSION}-windows-${{ matrix.arch }}.zip .
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Failed to create ZIP package"
-            exit 1
-          fi
-          
-          echo "=== Package created successfully ==="
-          ls -la $HOME/aseprite-source/build/aseprite-*.zip
-        shell: bash
-        
-      - name: Copy Inno Setup script for Windows
-        if: matrix.platform == 'windows'
-        run: |
-          # Copy the ISS file to a location where Inno Setup can find it
-          mkdir -p D:/inno
-          
-          # Check if the ISS file exists in the source, if not create a basic one
-          if [ -f "$HOME/aseprite-source/inno/aseprite.iss" ]; then
-            cp $HOME/aseprite-source/inno/aseprite.iss D:/inno/
-          else
-            echo "Creating basic Inno Setup script since none exists in source"
-            cat > D:/inno/aseprite.iss << 'EOFISS'
-          [Setup]
-          AppId={{A4C4C8FB-73E4-4C6F-B98F-0F4E2F5D6C89}}
-          AppName=Aseprite
-          AppVersion={#AppVersion}
-          AppPublisher=Igara Studio S.A.
-          AppPublisherURL=https://www.aseprite.org/
-          AppSupportURL=https://www.aseprite.org/
-          AppUpdatesURL=https://www.aseprite.org/
-          DefaultDirName={autopf}\Aseprite
-          DefaultGroupName=Aseprite
-          AllowNoIcons=yes
-          LicenseFile=
-          OutputDir=D:\inno\Output
-          OutputBaseFilename=setup-aseprite-{#AppVersion}-{#Architecture}
-          SetupIconFile=
-          Compression=lzma
-          SolidCompression=yes
-          WizardStyle=modern
-          ArchitecturesAllowed={#ArchitecturesAllowed}
-          ArchitecturesInstallIn64BitMode=x64
-          
-          [Languages]
-          Name: "english"; MessagesFile: "compiler:Default.isl"
-          
-          [Tasks]
-          Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
-          
-          [Files]
-          Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
-          
-          [Icons]
-          Name: "{group}\{cm:UninstallProgram,Aseprite}"; Filename: "{uninstallexe}"
-          Name: "{autodesktop}\Aseprite"; Filename: "{app}\aseprite.exe"; Tasks: desktopicon
-          
-          [Run]
-          Filename: "{app}\aseprite.exe"; Description: "{cm:LaunchProgram,Aseprite}"; Flags: nowait postinstall skipifsilent
-          EOFISS
-          fi
-          ls -la D:/inno/
-        shell: bash
-
-      - name: Compile .ISS to .EXE Installer
-        if: matrix.platform == 'windows'
-        uses: Minionguyjpro/Inno-Setup-Action@v1.2.2
-        with:
-          path: D:/inno/aseprite.iss
-          options: /DAppVersion=${{ env.VERSION }} /DArchitecture=${{ matrix.inno-arch }} /DArchitecturesAllowed=${{ matrix.inno-allowed }} /DSourceDir=${{ env.HOME }}/aseprite-source/build/bin
-
-      - name: Create macOS package
-        if: matrix.platform == 'macos'
-        run: |
-          cd $HOME/aseprite-source/build
-          
-          echo "=== Contents of build directory ==="
-          ls -la
-          
-          echo "=== Contents of bin directory ==="
-          ls -la bin/
-          
-          # Create a package based on what's available
-          if [ -d "bin/Aseprite.app" ]; then
-            echo "=== Found Aseprite.app in bin directory ==="
-            cd bin
-            zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
-          elif [ -d "Aseprite.app" ]; then
-            echo "=== Found Aseprite.app in build directory ==="
-            zip -r aseprite-${VERSION}-macos-${{ matrix.arch }}.zip Aseprite.app
-          elif [ -f "bin/aseprite" ]; then
-            echo "=== Found aseprite binary, packaging bin contents ==="
-            cd bin
-            zip -r ../aseprite-${VERSION}-macos-${{ matrix.arch }}.zip .
-          else
-            echo "ERROR: Neither Aseprite.app nor aseprite binary found"
-            exit 1
-          fi
-          
-          echo "=== Package created successfully ==="
-          ls -la $HOME/aseprite-source/build/aseprite-*.zip
-        shell: bash
-
-      - name: Create Linux package
-        if: matrix.platform == 'linux'
-        run: |
-          cd $HOME/aseprite-source/build
-          
-          echo "=== Contents of build directory ==="
-          ls -la
-          
-          echo "=== Contents of bin directory ==="
-          ls -la bin/
-          
-          # Check if aseprite binary exists
-          if [ ! -f "bin/aseprite" ]; then
-            echo "ERROR: aseprite binary not found in bin directory"
-            exit 1
-          fi
-          
-          cd bin
-          echo "=== Creating tar.gz package ==="
-          tar -czvf ../aseprite-${VERSION}-linux-${{ matrix.arch }}.tar.gz .
-          
-          if [ $? -ne 0 ]; then
-            echo "ERROR: Failed to create tar.gz package"
-            exit 1
-          fi
-          
-          echo "=== Package created successfully ==="
-          ls -la $HOME/aseprite-source/build/aseprite-*.tar.gz
-        shell: bash
-
-      - name: List files before upload
-        run: |
-          echo "=== Environment Variables ==="
-          echo "HOME: $HOME"
-          echo "VERSION: $VERSION"
-          echo "Platform: ${{ matrix.platform }}"
-          echo "Arch: ${{ matrix.arch }}"
-          echo "Installer ext: ${{ matrix.installer-ext }}"
-          
-          echo "=== Files in build directory ==="
-          ls -la $HOME/aseprite-source/build/ 2>/dev/null || echo "Build directory not found"
-          
-          echo "=== Aseprite package files ==="
-          find $HOME/aseprite-source/build -name "aseprite-*" -type f 2>/dev/null || echo "No aseprite-* files found"
-          
-          echo "=== Windows Inno Setup Output ==="
-          if [ -d "D:/inno/Output" ]; then
-            ls -la D:/inno/Output/
-          else
-            echo "D:/inno/Output directory not found (expected for non-Windows builds)"
-          fi
-          
-          echo "=== Complete file listing for upload patterns ==="
-          echo "Looking for: $HOME/aseprite-source/build/aseprite-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}"
-          ls -la $HOME/aseprite-source/build/aseprite-${VERSION}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }} 2>/dev/null || echo "No files match upload pattern"
-        shell: bash
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4.6.2
-        with:
-          name: ${{ matrix.artifact-name }}
-          path: |
-            ${{ env.HOME }}/aseprite-source/build/aseprite-${{ env.VERSION }}-${{ matrix.platform }}-${{ matrix.arch }}*.${{ matrix.installer-ext }}
-            D:/inno/Output/*.exe
-          retention-days: 7
-          if-no-files-found: warn
+          group: aseprite
+          repo: aseprite
+          match: Aseprite-.*?-Source.zip
 
   create-release:
     name: Create Release
-    needs: [prepare, build]
+    needs: fetch-aseprite-info
+    if: >
+      needs.fetch-aseprite-info.result == 'success'
+      && (github.event_name != 'workflow_dispatch'
+          || github.event.inputs.run_create == 'true')
     runs-on: ubuntu-latest
-    env:
-      VERSION: ${{ needs.prepare.outputs.version }}
+    permissions:
+      contents: write
+    outputs:
+      download-link: ${{ needs.fetch-aseprite-info.outputs.download-link }}
+      release-tag:    ${{ needs.fetch-aseprite-info.outputs.release-tag }}
     steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4.1.4
+      - uses: actions/checkout@v2
+      - uses: ncipollo/release-action@v1
         with:
-          path: artifacts
+          tag:     ${{ needs.fetch-aseprite-info.outputs.release-tag }}
+          body:    Aseprite-${{ needs.fetch-aseprite-info.outputs.release-tag }}
+          skipIfReleaseExists: true
+          token:   ${{ secrets.GITHUB_TOKEN }}
 
-      - name: List downloaded artifacts
-        run: |
-          find artifacts -type f | sort
+  build-aseprite:
+    name: Build Aseprite
+    needs: create-release
+    if: >
+      needs.create-release.result == 'success'
+      && (github.event_name != 'workflow_dispatch'
+          || github.event.inputs.run_build == 'true')
+    permissions:
+      contents: write
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, ubuntu-latest, macOS-latest]
+      fail-fast: false
+    steps:
+      - name: Install Dependencies (Linux)
+        if: runner.os == 'Linux'
         shell: bash
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y \
+            libpixman-1-dev libfreetype6-dev libharfbuzz-dev zlib1g-dev \
+            libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
 
-      - name: Create Release
-        id: create_release
-        uses: softprops/action-gh-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Install Dependencies (macOS)
+        if: runner.os == 'macOS-latest'
+        run: brew install ninja p7zip jpeg-turbo wget
+
+      - uses: actions/checkout@v4
+
+      - name: Install Aseprite
+        shell: bash
+        run: |
+          git clone --recurse-submodules -j8 \
+            https://github.com/aseprite/aseprite \
+            --branch ${{ needs.create-release.outputs.release-tag }} aseprite
+
+      - name: Install Skia
+        working-directory: aseprite
+        shell: bash
+        run: |
+          if [[ "${{ runner.os }}" == "Windows" ]]; then
+            choco install wget -y --no-progress
+            wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Windows-Release-x64.zip
+            unzip Skia-Windows-Release-x64.zip -d skia
+          elif [[ "${{ runner.os }}" == "macOS" ]]; then
+            wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-macOS-Release-arm64.zip
+            unzip Skia-macOS-Release-arm64.zip -d skia
+          else
+            wget https://github.com/aseprite/skia/releases/download/m124-08a5439a6b/Skia-Linux-Release-x64.zip
+            unzip Skia-Linux-Release-x64.zip -d skia
+          fi
+
+      - uses: aseprite/get-ninja@main
+
+      - uses: ilammy/msvc-dev-cmd@v1
+        if: runner.os == 'Windows'
+
+      - name: Generating Makefiles
+        shell: bash
+        working-directory: aseprite
+        run: |
+          enable_ccache=off
+          laf_backend=skia
+          enable_scripting=on
+
+          if [[ "${{ runner.os }}" == "macOS" ]]; then
+            skia_arch=arm64
+          else
+            skia_arch=x64
+          fi
+
+          cmake -S . -B build -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ env.BUILD_TYPE }} \
+            -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
+            -DENABLE_TESTS=OFF \
+            -DENABLE_SCRIPTING=$enable_scripting \
+            -DENABLE_CCACHE=$enable_ccache \
+            -DLAF_BACKEND=$laf_backend \
+            -DSKIA_DIR=$(realpath skia) \
+            -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-$skia_arch)
+
+      - name: Compiling
+        shell: bash
+        working-directory: aseprite
+        run: ninja -C build
+
+      - name: Clean Up Build folder
+        shell: bash
+        working-directory: aseprite/build/bin
+        run: find . -mindepth 1 ! \( -name 'aseprite' -o -name 'aseprite.exe' -o -name 'data' -prune \) -exec rm -rf {} +
+
+      - name: Make portable zip
+        working-directory: aseprite/build/bin
+        run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
+
+      - name: Create release
+        working-directory: aseprite/build/bin
+        run: 7z -tzip a Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip *
+
+      - name: Upload release
+        uses: svenstaro/upload-release-action@v2
         with:
-          tag_name: v${{ env.VERSION }}
-          name: Aseprite v${{ env.VERSION }}
-          draft: true
-          prerelease: false
-          files: |
-            artifacts/**/*
-          body: |
-            # Aseprite v${{ env.VERSION }}
-            
-            ## Packages
-            
-            ### Windows
-            - Windows x64: Download the .zip file and extract to use Aseprite, or use the installer (.exe)
-            - Windows x86: Download the .zip file and extract to use Aseprite, or use the installer (.exe)
-            
-            ### macOS
-            - macOS Intel (x64): Download the .zip file, extract, and move Aseprite.app to your Applications folder
-            - macOS Apple Silicon (arm64): Download the .zip file, extract, and move Aseprite.app to your Applications folder
-            
-            ### Linux
-            - Linux x64: Download the .tar.gz file and extract to use Aseprite
-            - Linux x86: Download the .tar.gz file and extract to use Aseprite
-            
-            ## Release Notes
-            
-            Built by: @BachMacThanh  
-            Build date: 2025-06-11 04:20:09
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file:       aseprite/build/bin/Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip
+          asset_name: Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip
+          tag:        ${{ needs.create-release.outputs.release-tag }}
