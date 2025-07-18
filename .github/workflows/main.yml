@@ -85,10 +85,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y \
             libpixman-1-dev libfreetype6-dev libharfbuzz-dev zlib1g-dev \
-            libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev
+            libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev \
+            libfuse2 fuse
 
       - name: Install Dependencies (macOS)
-        if: runner.os == 'macOS-latest'
+        if: runner.os == 'macOS'
         run: brew install ninja p7zip jpeg-turbo wget
 
       - uses: actions/checkout@v4
@@ -159,14 +160,84 @@ jobs:
         working-directory: aseprite/build/bin
         run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
 
-      - name: Create release
+      - name: Create release zip
         working-directory: aseprite/build/bin
         run: 7z -tzip a Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip *
 
-      - name: Upload release
+      - name: Create AppImage (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        working-directory: aseprite
+        run: |
+          # Download linuxdeploy
+          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage
+
+          # Create AppDir structure
+          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/128x128/apps AppDir/usr/share/metainfo
+
+          # Copy binaries and data
+          cp build/bin/aseprite AppDir/usr/bin/
+          cp -r build/bin/data AppDir/usr/share/aseprite/
+
+          # Create desktop entry
+          cat > AppDir/usr/share/applications/aseprite.desktop << EOF
+          [Desktop Entry]
+          Type=Application
+          Name=Aseprite
+          Comment=Animated sprite editor & pixel art tool
+          Exec=aseprite
+          Icon=aseprite
+          Terminal=false
+          Categories=Graphics;2DGraphics;RasterGraphics;
+          MimeType=image/bmp;image/gif;image/jpeg;image/png;image/x-pcx;image/x-tga;
+          EOF
+
+          # Extract icon from data directory
+          cp build/bin/data/icons/ase128.png AppDir/usr/share/icons/hicolor/128x128/apps/aseprite.png
+
+          # Create AppStream metadata
+          cat > AppDir/usr/share/metainfo/aseprite.appdata.xml << EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <component type="desktop-application">
+            <id>aseprite</id>
+            <name>Aseprite</name>
+            <summary>Animated sprite editor &amp; pixel art tool</summary>
+            <description>
+              <p>
+                Aseprite is a pixel art tool to create 2D animations, sprites and any kind of graphics for games.
+              </p>
+            </description>
+            <categories>
+              <category>Graphics</category>
+            </categories>
+            <url type="homepage">https://www.aseprite.org/</url>
+            <launchable type="desktop-id">aseprite.desktop</launchable>
+            <provides>
+              <binary>aseprite</binary>
+            </provides>
+          </component>
+          EOF
+
+          # Create the AppImage
+          ./linuxdeploy-x86_64.AppImage --appdir AppDir --output appimage
+          
+          # Rename the AppImage to be more consistent
+          mv Aseprite-*.AppImage build/bin/Aseprite-${{ needs.create-release.outputs.release-tag }}-Linux.AppImage
+
+      - name: Upload zip release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file:       aseprite/build/bin/Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip
           asset_name: Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip
+          tag:        ${{ needs.create-release.outputs.release-tag }}
+
+      - name: Upload AppImage (Linux)
+        if: runner.os == 'Linux'
+        uses: svenstaro/upload-release-action@v2
+        with:
+          repo_token: ${{ secrets.GITHUB_TOKEN }}
+          file:       aseprite/build/bin/Aseprite-${{ needs.create-release.outputs.release-tag }}-Linux.AppImage
+          asset_name: Aseprite-${{ needs.create-release.outputs.release-tag }}-Linux.AppImage
           tag:        ${{ needs.create-release.outputs.release-tag }}
