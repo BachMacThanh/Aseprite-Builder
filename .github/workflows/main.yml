@@ -179,7 +179,7 @@ jobs:
           Type=Application
           Categories=Graphics;
           EOL
-          wget -O AppDir/aseprite.png https://raw.githubusercontent.com/aseprite/aseprite/main/data/icons/aseprite-logo-128.png
+          wget -O AppDir/aseprite.png https://raw.githubusercontent.com/aseprite/aseprite/refs/heads/main/data/icons/ase128.png
           chmod +x AppDir/aseprite.png
           cat > AppDir/AppRun <<EOL
           #!/bin/sh
