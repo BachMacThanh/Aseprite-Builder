@@ -86,10 +86,10 @@ jobs:
           sudo apt-get install -y \
             libpixman-1-dev libfreetype6-dev libharfbuzz-dev zlib1g-dev \
             libx11-dev libxcursor-dev libxi-dev libgl1-mesa-dev libfontconfig1-dev \
-            libfuse2 fuse
+            fuse libfuse2
 
       - name: Install Dependencies (macOS)
-        if: runner.os == 'macOS'
+        if: runner.os == 'macOS-latest'
         run: brew install ninja p7zip jpeg-turbo wget
 
       - uses: actions/checkout@v4
@@ -152,74 +152,56 @@ jobs:
         run: ninja -C build
 
       - name: Clean Up Build folder
+        if: runner.os != 'Linux'
         shell: bash
         working-directory: aseprite/build/bin
         run: find . -mindepth 1 ! \( -name 'aseprite' -o -name 'aseprite.exe' -o -name 'data' -prune \) -exec rm -rf {} +
 
       - name: Make portable zip
+        if: runner.os != 'Linux'
         working-directory: aseprite/build/bin
         run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
 
-      - name: Create release zip
-        working-directory: aseprite/build/bin
-        run: 7z -tzip a Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip *
-
       - name: Create AppImage (Linux)
         if: runner.os == 'Linux'
-        shell: bash
-        working-directory: aseprite
+        working-directory: aseprite/build/bin
         run: |
-          # Download linuxdeploy
-          wget -q https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
-
-          # Create AppDir structure
-          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/128x128/apps
-
-          # Copy binaries and data
-          cp build/bin/aseprite AppDir/usr/bin/
-          cp -r build/bin/data AppDir/usr/share/aseprite/
-
-          # Create desktop entry
-          cat > AppDir/usr/share/applications/org.aseprite.Aseprite.desktop << EOF
+          wget -O appimagetool https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          mkdir -p AppDir/usr/bin
+          cp -r data AppDir/usr/bin
+          cp aseprite AppDir/usr/bin
+          cat > AppDir/aseprite.desktop <<EOL
           [Desktop Entry]
-          Type=Application
           Name=Aseprite
-          Comment=Animated sprite editor & pixel art tool
           Exec=aseprite
           Icon=aseprite
-          Terminal=false
-          Categories=Graphics;2DGraphics;RasterGraphics;
-          MimeType=image/bmp;image/gif;image/jpeg;image/png;image/x-pcx;image/x-tga;
-          EOF
+          Type=Application
+          Categories=Graphics;
+          EOL
+          wget -O AppDir/aseprite.png https://raw.githubusercontent.com/aseprite/aseprite/main/data/icons/aseprite-logo-128.png
+          chmod +x AppDir/aseprite.png
+          cat > AppDir/AppRun <<EOL
+          #!/bin/sh
+          cd "\$(dirname "\$0")/usr/bin"
+          ./aseprite "\$@"
+          EOL
+          chmod +x AppDir/AppRun
+          ./appimagetool AppDir Aseprite-${{ needs.create-release.outputs.release-tag }}-x86_64.AppImage
 
-          # Extract icon from data directory
-          cp build/bin/data/icons/ase128.png AppDir/usr/share/icons/hicolor/128x128/apps/aseprite.png
+      - name: Create release
+        if: runner.os != 'Linux'
+        working-directory: aseprite/build/bin
+        run: 7z a -tzip Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip *
 
-          # Create the AppImage with --no-appstream flag to bypass validation
-          APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy-x86_64.AppImage \
-            --appdir AppDir \
-            --desktop-file=AppDir/usr/share/applications/org.aseprite.Aseprite.desktop \
-            --icon-file=AppDir/usr/share/icons/hicolor/128x128/apps/aseprite.png \
-            --output appimage \
-            --no-appstream
-
-          # Rename the AppImage to be more consistent
-          mv Aseprite*.AppImage Aseprite-${{ needs.create-release.outputs.release-tag }}-Linux.AppImage
-
-      - name: Upload zip release
+      - name: Upload release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file:       aseprite/build/bin/Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip
-          asset_name: Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip
-          tag:        ${{ needs.create-release.outputs.release-tag }}
-
-      - name: Upload AppImage (Linux)
-        if: runner.os == 'Linux'
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file:       aseprite/Aseprite-${{ needs.create-release.outputs.release-tag }}-Linux.AppImage
-          asset_name: Aseprite-${{ needs.create-release.outputs.release-tag }}-Linux.AppImage
+          file: |
+            ${{ runner.os == 'Linux' && format('aseprite/build/bin/Aseprite-{0}-x86_64.AppImage', needs.create-release.outputs.release-tag) || '' }}
+            ${{ runner.os != 'Linux' && format('aseprite/build/bin/Aseprite-{0}-{1}.zip', needs.create-release.outputs.release-tag, runner.os) || '' }}
+          asset_name: |
+            ${{ runner.os == 'Linux' && format('Aseprite-{0}-x86_64.AppImage', needs.create-release.outputs.release-tag) || '' }}
+            ${{ runner.os != 'Linux' && format('Aseprite-{0}-{1}.zip', needs.create-release.outputs.release-tag, runner.os) || '' }}
           tag:        ${{ needs.create-release.outputs.release-tag }}
