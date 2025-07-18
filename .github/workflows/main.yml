@@ -174,7 +174,7 @@ jobs:
           chmod +x linuxdeploy-x86_64.AppImage
 
           # Create AppDir structure
-          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/128x128/apps AppDir/usr/share/metainfo
+          mkdir -p AppDir/usr/bin AppDir/usr/lib AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/128x128/apps
 
           # Copy binaries and data
           cp build/bin/aseprite AppDir/usr/bin/
@@ -196,43 +196,13 @@ jobs:
           # Extract icon from data directory
           cp build/bin/data/icons/ase128.png AppDir/usr/share/icons/hicolor/128x128/apps/aseprite.png
 
-          # Create AppStream metadata with proper RDNS ID and license
-          cat > AppDir/usr/share/metainfo/org.aseprite.Aseprite.appdata.xml << EOF
-          <?xml version="1.0" encoding="UTF-8"?>
-          <component type="desktop-application">
-            <id>org.aseprite.Aseprite</id>
-            <metadata_license>CC0-1.0</metadata_license>
-            <project_license>EULA</project_license>
-            <name>Aseprite</name>
-            <summary>Animated sprite editor &amp; pixel art tool</summary>
-            <description>
-              <p>
-                Aseprite is a pixel art tool to create 2D animations, sprites and any kind of graphics for games.
-              </p>
-            </description>
-            <categories>
-              <category>Graphics</category>
-              <category>2DGraphics</category>
-              <category>RasterGraphics</category>
-            </categories>
-            <url type="homepage">https://www.aseprite.org/</url>
-            <developer_name>Aseprite Team</developer_name>
-            <launchable type="desktop-id">org.aseprite.Aseprite.desktop</launchable>
-            <provides>
-              <binary>aseprite</binary>
-            </provides>
-            <content_rating type="oars-1.1" />
-            <releases>
-              <release version="${{ needs.create-release.outputs.release-tag }}" date="$(date +%Y-%m-%d)" />
-            </releases>
-          </component>
-          EOF
-
-          # Create the AppImage (using --no-appstream to bypass validation if needed)
+          # Create the AppImage with --no-appstream flag to bypass validation
           APPIMAGE_EXTRACT_AND_RUN=1 ./linuxdeploy-x86_64.AppImage \
             --appdir AppDir \
             --desktop-file=AppDir/usr/share/applications/org.aseprite.Aseprite.desktop \
-            --output appimage
+            --icon-file=AppDir/usr/share/icons/hicolor/128x128/apps/aseprite.png \
+            --output appimage \
+            --no-appstream
 
           # Rename the AppImage to be more consistent
           mv Aseprite*.AppImage Aseprite-${{ needs.create-release.outputs.release-tag }}-Linux.AppImage
