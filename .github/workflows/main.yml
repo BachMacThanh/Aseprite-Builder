@@ -89,8 +89,12 @@ jobs:
             fuse libfuse2
 
       - name: Install Dependencies (macOS)
-        if: runner.os == 'macOS-latest'
-        run: brew install ninja p7zip jpeg-turbo wget
+        if: runner.os == 'macOS'
+        run: brew install ninja p7zip
+
+      - name: Install Inno Setup (Windows)
+        if: runner.os == 'Windows'
+        run: choco install innosetup -y
 
       - uses: actions/checkout@v4
 
@@ -152,15 +156,45 @@ jobs:
         run: ninja -C build
 
       - name: Clean Up Build folder
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         shell: bash
         working-directory: aseprite/build/bin
-        run: find . -mindepth 1 ! \( -name 'aseprite' -o -name 'aseprite.exe' -o -name 'data' -prune \) -exec rm -rf {} +
+        run: find . -mindepth 1 ! \( -name 'aseprite' -o -name 'data' -prune \) -exec rm -rf {} +
 
       - name: Make portable zip
-        if: runner.os != 'Linux'
+        if: runner.os == 'macOS'
         working-directory: aseprite/build/bin
-        run: echo '# This file is here so Aseprite behaves as a portable program' > aseprite.ini
+        run: 7z a -tzip Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip *
+
+      - name: Create Inno Setup script (Windows)
+        if: runner.os == 'Windows'
+        working-directory: aseprite/build/bin
+        shell: bash
+        run: |
+          cat > aseprite.iss <<EOL
+          [Setup]
+          AppName=Aseprite
+          AppVersion=${{ needs.create-release.outputs.release-tag }}
+          AppPublisher=Aseprite
+          DefaultDirName={autopf}\\Aseprite
+          DefaultGroupName=Aseprite
+          OutputDir=.
+          OutputBaseFilename=Aseprite-${{ needs.create-release.outputs.release-tag }}-setup
+          Compression=lzma
+          SolidCompression=yes
+
+          [Files]
+          Source: "*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs
+
+          [Icons]
+          Name: "{group}\\Aseprite"; Filename: "{app}\\aseprite.exe"
+          Name: "{commondesktop}\\Aseprite"; Filename: "{app}\\aseprite.exe"
+          EOL
+
+      - name: Compile Inno Setup installer (Windows)
+        if: runner.os == 'Windows'
+        working-directory: aseprite/build/bin
+        run: '"C:\Program Files (x86)\Inno Setup 6\iscc.exe" aseprite.iss'
 
       - name: Create AppImage (Linux)
         if: runner.os == 'Linux'
@@ -189,19 +223,16 @@ jobs:
           chmod +x AppDir/AppRun
           ./appimagetool AppDir Aseprite-${{ needs.create-release.outputs.release-tag }}-x86_64.AppImage
 
-      - name: Create release
-        if: runner.os != 'Linux'
-        working-directory: aseprite/build/bin
-        run: 7z a -tzip Aseprite-${{ needs.create-release.outputs.release-tag }}-${{ runner.os }}.zip *
-
       - name: Upload release
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: |
             ${{ runner.os == 'Linux' && format('aseprite/build/bin/Aseprite-{0}-x86_64.AppImage', needs.create-release.outputs.release-tag) || '' }}
-            ${{ runner.os != 'Linux' && format('aseprite/build/bin/Aseprite-{0}-{1}.zip', needs.create-release.outputs.release-tag, runner.os) || '' }}
+            ${{ runner.os == 'macOS' && format('aseprite/build/bin/Aseprite-{0}-{1}.zip', needs.create-release.outputs.release-tag, runner.os) || '' }}
+            ${{ runner.os == 'Windows' && format('aseprite/build/bin/Aseprite-{0}-setup.exe', needs.create-release.outputs.release-tag) || '' }}
           asset_name: |
             ${{ runner.os == 'Linux' && format('Aseprite-{0}-x86_64.AppImage', needs.create-release.outputs.release-tag) || '' }}
-            ${{ runner.os != 'Linux' && format('Aseprite-{0}-{1}.zip', needs.create-release.outputs.release-tag, runner.os) || '' }}
+            ${{ runner.os == 'macOS' && format('Aseprite-{0}-{1}.zip', needs.create-release.outputs.release-tag, runner.os) || '' }}
+            ${{ runner.os == 'Windows' && format('Aseprite-{0}-Windows-setup.exe', needs.create-release.outputs.release-tag) || '' }}
           tag:        ${{ needs.create-release.outputs.release-tag }}
