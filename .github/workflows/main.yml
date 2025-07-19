@@ -145,7 +145,7 @@ jobs:
             -DCMAKE_OSX_DEPLOYMENT_TARGET=10.9 \
             -DENABLE_TESTS=OFF \
             -DENABLE_SCRIPTING=$enable_scripting \
-            -DENABLE_CCACHE=$enable_ache \
+            -DENABLE_CCACHE=$enable_ccache \
             -DLAF_BACKEND=$laf_backend \
             -DSKIA_DIR=$(realpath skia) \
             -DSKIA_LIBRARY_DIR=$(realpath skia/out/Release-$skia_arch)
@@ -155,14 +155,15 @@ jobs:
         working-directory: aseprite
         run: ninja -C build
 
-      # *** BƯỚC MỚI ĐƯỢC THÊM VÀO ĐÂY ***
-      - name: Copy OpenSSL DLLs (Windows)
+      # *** BƯỚC CẬP NHẬT: TÌM KIẾM VÀ SAO CHÉP DLLs ***
+      - name: Find and Copy OpenSSL DLLs (Windows)
         if: runner.os == 'Windows'
         working-directory: aseprite/build/bin
         run: |
-          copy "C:\Program Files\Git\usr\bin\libcrypto-1_1-x64.dll" .
-          copy "C:\Program Files\Git\usr\bin\libssl-1_1-x64.dll" .
-      
+          Get-ChildItem -Path "C:\\" -Recurse -Filter "libcrypto-1_1-x64.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 | Copy-Item -Destination .
+          Get-ChildItem -Path "C:\\" -Recurse -Filter "libssl-1_1-x64.dll" -ErrorAction SilentlyContinue | Select-Object -First 1 | Copy-Item -Destination .
+        shell: powershell
+
       - name: Clean Up Build folder
         if: runner.os == 'macOS'
         shell: bash
